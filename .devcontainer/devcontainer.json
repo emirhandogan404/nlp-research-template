@@ -1,21 +1,21 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-dockerfile
 {
-	"name": "nlp-research-template:latest",
+	//"name": "emirhan404/gorilla:latest",
 	// Put your own built docker image here
-	"image": "konstantinjdobler/nlp-research-template:latest",
+	//"image": "emirhan404/gorilla:latest",
 	//-------------------------------------------------
 	// ---- Alternative: let VS Code build the image---
 	// ------------------------------------------------
-	// "build": {
-	// 	// Sets the run context to one level up instead of the .devcontainer folder.
-	// 	"context": "..",
-	// 	// Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
-	// 	"dockerfile": "../Dockerfile",
-	//	// "args": {
-	//	// 	"OS_SELECTOR": "ubuntu" // force ubuntu base OS for devcontainer, necessary  if you want to use "features"
-	//	// }
-	// },
+	"build": {
+	 	// Sets the run context to one level up instead of the .devcontainer folder.
+ 	"context": "..",
+	 	// Update the 'dockerFile' property if you aren't using the standard 'Dockerfile' filename.
+	"dockerfile": "../Dockerfile",
+	"args": {
+	"OS_SELECTOR": "ubuntu" // force ubuntu base OS for devcontainer, necessary  if you want to use "features"
+	}
+	},
 	////////////////////////////////////////////////////////////
 	// -----------------------------------
 	// CUSTOMIZE SOME THINGS BELOW HERE !!!!!
@@ -24,8 +24,9 @@
 	// Specify which GPU device you want to use (e.g "device=0")
 	"runArgs": [
 		"--ipc=host",
-		//	"--gpus",
-		//	"device=CHANGE_ME"
+		//"--gpus",
+		//"device=1",
+		"-u", "0"
 	],
 	// ------------------------------------------------------------
 	// Setup your mounts and env vars like for a docker run command
@@ -41,6 +42,9 @@
 		"source=${localEnv:HOME}/.netrc,target=/home/mamba/.netrc,type=bind", // this is to get WANDB_API_KEY from .netrc
 		"source=${localEnv:HOME}/.gitconfig,target=/home/mamba/.gitconfig,type=bind", // this is to get git credentials
 		"source=${localEnv:HOME}/.cache,target=/home/mamba/.cache,type=bind", // general cache directory
+		"source=/scratch1/wildlife_conservation/data/face_detection,target=/workspaces/nlp-research-template/data/face_detection,type=bind,ro", // dataset
+		"source=/scratch1/wildlife_conservation/data/all_gorillas/cxl/face_images_grouped,target=/workspaces/nlp-research-template/data/all_gorillas/cxl/face_images_grouped,type=bind,ro",
+		"source=/scratch1/wildlife_conservation/data/gorilla_experiment_splits/k-fold-splits,target=/workspaces/nlp-research-template/data/gorilla_experiment_splits/k-fold-splits,type=bind,ro"
 	],
 	"remoteEnv": {
 		"WANDB_API_KEY": "${localEnv:WANDB_API_KEY}",

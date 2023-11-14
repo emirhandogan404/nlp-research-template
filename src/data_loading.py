@@ -1,235 +1,317 @@
-import errno
-import glob
+from typing import TYPE_CHECKING, Tuple
 import os
-import shutil
-import tempfile
-from itertools import chain
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-import datasets
-import lightning as L
 from print_on_steroids import logger
-from torch.utils.data.dataloader import DataLoader
-from transformers import DataCollatorForLanguageModeling, PreTrainedTokenizerFast
+from PIL import Image
 
-from dlib.frameworks.pytorch import get_rank
+import torch
+import random
+
+# import time
+
+# import model
+
+# from torch import nn
+from torch.utils.data import Dataset, DataLoader, Sampler
+from torchvision.transforms.functional import to_tensor, resize, pad
+from torchvision.transforms import RandAugment
+import torchvision.transforms as transforms
+
+from torchvision.datasets import MNIST
+
+# from torchvision import transforms
+import lightning as L
+
+# from dlib.frameworks.pytorch import get_rank
 
 if TYPE_CHECKING:
     from train import TrainingArgs
 
 
-class LMDataModule(L.LightningDataModule):
+def get_train_transforms():
+    # TODO: add RandAugment # use magnitude 5 and 3 operations
+    return RandAugment(num_ops=3, magnitude=5)
+
+
+class MNISTDataset(Dataset):
+    def __init__(self, img_dir, transform=None):
+        self.img_dir = img_dir
+        self.transform = transform
+        self.data_list = []
+        for dir in os.listdir(img_dir):
+            mylist = []
+            for file in os.listdir(os.path.join(img_dir, dir)):
+                mylist.append(os.path.join(dir, file))
+            self.data_list.append(mylist)
+        self.data_list.sort()
+
+    def __len__(self):
+        return sum(len(x) for x in self.data_list)
+
+    def __getitem__(self, index):
+        anchor = self.data_list[index[0][0]][index[0][1]]
+        positive = self.data_list[index[1][0]][index[1][1]]
+        negative = self.data_list[index[2][0]][index[2][1]]
+
+        anchor = Image.open(os.path.join(self.img_dir,anchor))
+        positive = Image.open(os.path.join(self.img_dir,positive))
+        negative = Image.open(os.path.join(self.img_dir,negative))
+        
+        if self.transform:
+            anchor = self.transform(anchor)
+            positive = self.transform(positive)
+            negative = self.transform(negative)
+
+        return anchor, positive, negative
+
+class MNISTSampler(Sampler):
+    def __init__(self, dataset):
+        self.dataset = dataset
+        
+    def __iter__(self):
+        self.final = []
+        self.idxlist = random.sample(range(len(self.dataset.data_list)), len(self.dataset.data_list))
+        random.shuffle(self.idxlist)
+        for i in self.idxlist:
+            for j in range(len(self.dataset.data_list[i])):
+                try:
+                    p = random.choice(list(set([x for x in range(len(self.dataset.data_list[i]))]) - set([j])))
+                except IndexError:
+                    p = 0
+                n = random.choice(list(set([x for x in range(len(self.dataset.data_list))]) - set([i])))
+                n2 = random.randint(0, len(self.dataset.data_list[n])-1)
+                self.final.append(((i, j), (i, p), (n, n2)))
+        random.shuffle(self.final)
+        return iter(self.final)
+
+    def __len__(self):
+        return self.dataset.__len__()
+
+
+# Annahme: Daten liegen alle in einem Ordner (data_dir)
+# Annahme: Bilder sind bereits auf Gesichter zugeschnitten
+# Annahme: Name der Dateien entspricht Schema: <name_individuum>-<nr>-img-<nr>.jpg
+class TripletDataset(Dataset):
+    def __init__(self, img_dir, target_size, transform=None):
+        self.img_dir = img_dir
+        self.target_size = target_size
+        self.transform = transform
+        self.data_list = []
+        for dir in os.listdir(img_dir):
+            mylist = []
+            for file in os.listdir(os.path.join(img_dir, dir)):
+                mylist.append(os.path.join(dir, file))
+            self.data_list.append(mylist)
+        self.data_list.sort()
+
+    def __len__(self):
+        return sum(len(x) for x in self.data_list)
+
+    def __getitem__(self, index):
+        anchor = self.data_list[index[0][0]][index[0][1]]
+        positive = self.data_list[index[1][0]][index[1][1]]
+        negative = self.data_list[index[2][0]][index[2][1]]
+
+        anchor = Image.open(os.path.join(self.img_dir,anchor))
+        positive = Image.open(os.path.join(self.img_dir,positive))
+        negative = Image.open(os.path.join(self.img_dir,negative))
+        
+        pad_width = max(self.target_size[0] - anchor.width, 0)
+        pad_height = max(self.target_size[1] - anchor.height, 0)
+        
+        anchor = pad(anchor, padding=(0, 0, pad_width, pad_height), fill=0)
+
+        pad_width = max(self.target_size[0] - positive.width, 0)
+        pad_height = max(self.target_size[1] - positive.height, 0)
+        
+        positive = pad(positive, padding=(0, 0, pad_width, pad_height), fill=0)
+        
+        pad_width = max(self.target_size[0] - negative.width, 0)
+        pad_height = max(self.target_size[1] - negative.height, 0)
+        
+        negative = pad(negative, padding=(0, 0, pad_width, pad_height), fill=0)
+        
+        if self.transform:
+            anchor = self.transform(anchor)
+            positive = self.transform(positive)
+            negative = self.transform(negative)
+
+        return anchor, positive, negative
+
+class TripletSampler(Sampler):
+    def __init__(self, dataset):
+        self.dataset = dataset
+        
+    def __iter__(self):
+        self.final = []
+        self.idxlist = random.sample(range(len(self.dataset.data_list)), len(self.dataset.data_list))
+        random.shuffle(self.idxlist)
+        for i in self.idxlist:
+            for j in range(len(self.dataset.data_list[i])):
+                try:
+                    p = random.choice(list(set([x for x in range(len(self.dataset.data_list[i]))]) - set([j])))
+                except IndexError:
+                    p = 0
+                n = random.choice(list(set([x for x in range(len(self.dataset.data_list))]) - set([i])))
+                n2 = random.randint(0, len(self.dataset.data_list[n])-1)
+                self.final.append(((i, j), (i, p), (n, n2)))
+        random.shuffle(self.final)
+        return iter(self.final)
+
+    def __len__(self):
+        return self.dataset.__len__()
+
+
+# read all directories in data_dir (a directory corresponds to one individual)
+# returns a list of all image files in data_dir prefixed with the individual's name (and -)
+
+
+def read_image_files(data_dir):
+    individuals = [f for f in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, f))]
+    image_files = []
+    for individual in individuals:
+        image_files.extend([individual + "-" + f for f in os.listdir(os.path.join(data_dir, individual))])
+
+    return image_files
+
+
+class GorillaDM(L.LightningDataModule):
     def __init__(
         self,
         training_args: "TrainingArgs",
-        tokenizer: PreTrainedTokenizerFast,
+        transform=get_train_transforms(),
     ):
         super().__init__()
         self.args = training_args
-        self.data_dir = training_args.data_dir
-        train_file, val_file = (
-            self.data_dir / self.args.train_file,
-            self.data_dir / self.args.val_file,
-        )
+        self.train_dir = training_args.train_dir
+        self.val_dir = training_args.val_dir
+        self.test_dir = training_args.test_dir
+        self.transform = transform
 
-        logger.debug(f"Train file path: {train_file} val file path: {val_file}")
+        logger.debug(f"Train data dir: {self.train_dir}")
 
-        self.train_file = str(train_file)
-        self.val_file = str(val_file)
-        self.tokenizer_path = self.args.tokenizer_path or self.args.hf_model_name
-        self.local_rank = get_rank()
+        # self.local_rank = get_rank()
 
-        self.tokenizer = tokenizer
-
+    # single gpu -> used for downloading and preprocessing which cannot be parallelized
     def prepare_data(self) -> None:
-        cache_exists, cache_path = self._get_dataset_cache_path(self.tokenizer_path)
-        if not cache_exists:
-            logger.info(f"Could not find cached processed dataset: {cache_path}, creating it now...")
-            processed_datasets = self.load_and_process_dataset(self.tokenizer, str(self.data_dir / "tokenized"))
-            logger.info(f"Saving dataset to {cache_path}...")
-            processed_datasets.save_to_disk(cache_path, num_proc=self.args.preprocessing_workers)
-        else:
-            logger.success(f"Found cached processed dataset: {cache_path}.")
-        if self.args.data_preprocessing_only:
-            exit(0)
+        pass  # nothing to do here
 
     def setup(self, stage):
-        cache_exists, cache_path = self._get_dataset_cache_path(self.tokenizer_path)
-        assert (
-            cache_exists
-        ), f"Could not find cached processed dataset: {cache_path}, should have been created in prepare_data()"
+        # TODO: implement train/val split
+        # self.train_dataset = BristolDataset(data_dir=self.train_dir, transform=self.transform)
+        # self.val_dataset = BristolDataset(data_dir=self.val_dir, transform=self.transform)
+        # self.train_sampler = BristolSampler(data_dir=self.train_dir)
+        # self.val_sampler = BristolSampler(data_dir=self.val_dir)
 
-        logger.info(f"Loading cached processed dataset from {cache_path}...", rank0_only=False)
-        processed_datasets = datasets.load_from_disk(cache_path)
-
-        pad_to_multiple_of = 8 if self.args.precision in ["16-mixed", "bf16-mixed"] else None
-        if self.args.language_modeling_objective == "clm":
-            data_collator = DataCollatorForLanguageModeling(
-                tokenizer=self.tokenizer, mlm=False, pad_to_multiple_of=pad_to_multiple_of
-            )
-        elif self.args.language_modeling_objective == "mlm":
-            DataCollatorClass = DataCollatorForLanguageModeling
-            data_collator = DataCollatorClass(
-                tokenizer=self.tokenizer,
-                mlm=True,
-                pad_to_multiple_of=pad_to_multiple_of,
-            )
-
-        self.train_dataset = processed_datasets["train"]
-        self.val_dataset = processed_datasets["val"]
-        self.data_collator = data_collator
-
-    def load_and_process_dataset(self, tokenizer, tokenized_data_dir):
-        extension = self.train_file.split(".")[-1]
-        if extension in ("txt", "raw"):
-            extension = "text"
-
-        data_files = {"train": self.train_file, "val": self.val_file}
-
-        logger.info("Loading raw dataset...")
-        tmp_load_dataset_cache_dir = tempfile.mkdtemp(dir=tokenized_data_dir) if self.args.conserve_disk_space else None
-        train_val_datasets = datasets.load_dataset(
-            extension,
-            data_files=data_files,
-            name=str(self.data_dir).replace("/", "_"),
-            num_proc=self.args.preprocessing_workers,
-            cache_dir=tmp_load_dataset_cache_dir,
-        )
-
-        if self.local_rank == 0:
-            logger.debug((train_val_datasets, train_val_datasets["train"][:2]))
-
-        if self.args.conserve_disk_space:
-            datasets.fingerprint.disable_caching()
-
-        processed_datasets = self.process_dataset_in_chunks(tokenizer=tokenizer, train_val_datasets=train_val_datasets)
-
-        # processed_datasets["train"] = processed_datasets["train"].shuffle(seed=self.args.seed) # <-- this is bad, triggers super expensive .flatten_indices op when .save_to_disk
-        logger.success(
-            f"Rank {self.local_rank} | Finished processing datasets: {processed_datasets} | First sample len: {len(processed_datasets['train'][0]['input_ids'])}"
-        )
-
-        if self.args.conserve_disk_space:
-            logger.info("Cleaning dataset loading cache...")
-            try:
-                shutil.rmtree(tmp_load_dataset_cache_dir)
-            except OSError as e:
-                # Reraise unless ENOENT: No such file or directory
-                # (ok if directory has already been deleted)
-                if e.errno != errno.ENOENT:
-                    raise
-
-            datasets.fingerprint.enable_caching()
-
-        return processed_datasets
-
-    def process_dataset_in_chunks(self, tokenizer, train_val_datasets):
-        """Expects input data to be one document per line. Tokenizes the documents and splits into chunks of max_sequence_legth."""
-        tokenized_datasets = train_val_datasets.map(
-            make_tokenize_function(tokenizer, max_seq_length=None, truncate=False),
-            batched=True,
-            num_proc=1,  # Should use only one process to leverage tokenizers parallelism
-            remove_columns=["text"],
-            load_from_cache_file=not self.args.overwrite_data_cache,
-            desc="Running tokenizer on every text in dataset",
-        )
-
-        processed_datasets = tokenized_datasets.map(
-            make_group_text_function(self.args.block_size),
-            batched=True,
-            batch_size=16_000,
-            num_proc=self.args.preprocessing_workers,
-            load_from_cache_file=not self.args.overwrite_data_cache,
-            desc=f"Grouping texts in chunks of {self.args.block_size}",
-        )
-
-        return processed_datasets
+        self.train_dataset = TripletDataset("./data/gorilla_experiment_splits/k-fold-splits/cxl-bristol_face-openset=False_0/train", (224, 224), transform=transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()]))
+        self.val_dataset = val = TripletDataset("./data/gorilla_experiment_splits/k-fold-splits/cxl-bristol_face-openset=False_0/database_set", (224, 224), transform=transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()]))
+        self.train_sampler = TripletSampler(self.train_dataset)
+        self.val_sampler = TripletSampler(self.val_dataset)
 
     def train_dataloader(self):
         common_args = dict(
-            batch_size=self.args.micro_batch_size,
+            batch_size=self.args.batch_size,
             num_workers=self.args.workers,
             persistent_workers=(
                 True if self.args.workers > 0 else False
             ),  # https://discuss.pytorch.org/t/what-are-the-dis-advantages-of-persistent-workers/102110/10
             pin_memory=True,
-            shuffle=True,
         )
-        return DataLoader(self.train_dataset, collate_fn=self.data_collator, **common_args)
+        return DataLoader(self.train_dataset, sampler=self.train_sampler, **common_args)
 
     def val_dataloader(self):
         common_args = dict(
-            batch_size=self.args.eval_micro_batch_size,
+            batch_size=self.args.batch_size,
             num_workers=self.args.workers,
             persistent_workers=(
                 True if self.args.workers > 0 else False
             ),  # https://discuss.pytorch.org/t/what-are-the-dis-advantages-of-persistent-workers/102110/10
-            pin_memory=True,
+            pin_memory=True,  # TODO: understand this # short answer: aims to optimize data transfer between the CPU and GPU
         )
-        return DataLoader(self.val_dataset, collate_fn=self.data_collator, **common_args)
-
-    def _get_dataset_cache_path(self, tokenizer_name: str):
-        tokenizer_name = Path(self.tokenizer_path).as_posix().replace("/", "_")
-        tokenize_fn = make_tokenize_function(self.tokenizer, self.args.block_size)
-        tokenize_fn_hash = datasets.fingerprint.Hasher.hash(tokenize_fn)
-        tokenized_data_dir = str(self.data_dir / "tokenized")
-        cache_path = os.path.join(
-            tokenized_data_dir,
-            f"{self.args.train_file}.{self.args.val_file}.seq_len_{self.args.block_size}.tokenizer_{tokenizer_name}.tokenize_fn_hash_{tokenize_fn_hash}.arrow",
-        )
-        maybe_cache_path = os.path.join(
-            tokenized_data_dir,
-            f"{self.args.train_file}.{self.args.val_file}.seq_len_{self.args.block_size}.tokenizer_{tokenizer_name}.tokenize_fn_hash_.*.arrow",
-        )
-        maybe_cache_path_match_list = glob.glob(maybe_cache_path)
-
-        if os.path.exists(cache_path):
-            return True, cache_path
-        elif len(maybe_cache_path_match_list) > 0 and os.path.exists(maybe_cache_path_match_list[0]):
-            logger.warning(
-                f"Rank {self.local_rank} | Did not find cached processed dataset: {cache_path} but {maybe_cache_path_match_list[0]}.",
-                "The tokenize function hash can change with small, functionally meaningless code changes in the tokenizers library.",
-                "Proceeding with existing found cache.",
-            )
-            return True, maybe_cache_path_match_list[0]
-        else:
-            return False, cache_path
+        return DataLoader(self.val_dataset, sampler=self.val_sampler, **common_args)
 
 
-def make_tokenize_function(tokenizer, max_seq_length=None, truncate=True):
-    """Needs to be outside of DataModule because of hashing error in dataset.map"""
+if __name__ == "__main__":
+    import model
 
-    def tokenize_function(examples):
-        return tokenizer(
-            examples["text"],
-            padding=False,
-            truncation=truncate,
-            max_length=max_seq_length,
-            # We use return_special_tokens_mask=True because DataCollatorForLanguageModeling is more efficient when it
-            # receives the `special_tokens_mask`.
-            return_special_tokens_mask=True,
-        )
+    # set seed
+    torch.manual_seed(42)
+    random.seed(45)
+    # test sampler and dataset with a single batch
+    # data_dir = "/workspaces/gorillavision/datasets/face_detection/all_images_no_cropped_backup"
+    # data_dir = "/workspaces/gorillavision/datasets/cxl/face_images_grouped"
+    # sampler = BristolSampler(data_dir)
+    # dataset = BristolDataset(data_dir=data_dir)
+    # dataloader = DataLoader(dataset, sampler=sampler, batch_size=1, num_workers=4)
+    # print(len(dataset))
+    # batch = next(iter(dataloader))
+    # # save an image
+    # img = batch[0][0].permute(1, 2, 0)
+    # Image.fromarray((img.numpy() * 255).astype("uint8")).save("test.jpg")
 
-    return tokenize_function
+    model1 = model.EfficientNetV2Wrapper(
+        model_name_or_path="",
+        from_scratch=True,
+        learning_rate=0.01,
+        weight_decay=0,
+        lr_schedule="lambda",
+        warmup_epochs=1,
+        lr_decay=0.99,
+        lr_decay_interval=2,
+        beta1=0.9,
+        beta2=0.999,
+        epsilon=1e-8,
+        save_hyperparameters=True,
+    )
+    print(model1.model)
 
+    # test dataloader
+    # batch = next(iter(dataloader))
+    # loss = model1._calculate_loss(batch)
+    # # print(loss)
 
-def make_group_text_function(max_seq_length):
-    """Needs to be outside of DataModule because of hashing error in dataset.map"""
+    # start_time = time.time()
+    # for batch in dataloader:
+    #     continue
+    # end_time = time.time()
+    # print(f"Time: {end_time - start_time} seconds")
 
-    def group_texts(examples):
-        # Concatenate all texts.
-        concatenated_examples = {k: list(chain(*examples[k])) for k in examples.keys()}
-        total_length = len(concatenated_examples[list(examples.keys())[0]])
-        # We drop the small remainder, we could add padding if the model supported it instead of this drop, you can
-        # customize this part to your needs.
-        if total_length >= max_seq_length:
-            total_length = (total_length // max_seq_length) * max_seq_length
-        # Split by chunks of max_len.
-        result = {
-            k: [t[i : i + max_seq_length] for i in range(0, total_length, max_seq_length)]
-            for k, t in concatenated_examples.items()
-        }
-        return result
+    # test MNIST stuff
+    sampler = MNISTSampler()
+    dataset = MNISTDataset()
+    dataloader = DataLoader(dataset, sampler=sampler, batch_size=1, num_workers=0)
 
-    return group_texts
+    # test model output shape
+    batch = next(iter(dataloader))
+    out = model1(batch[0])
+    out2 = model1.model(batch[0])
+    print(out.shape)
+    print(out2.shape)
+
+    # print(len(dataset))
+    # random.seed(45)
+    # batch = next(iter(dataloader))
+    # # save an image
+    # anchor_img, positive_img, negative_img = batch
+    # # anchor_img = anchor_img[0]
+    # print(anchor_img.shape)
+    # img = anchor_img[0]  # imgs are grayscale
+    # img = img.permute(1, 2, 0)
+    # img = img.squeeze()
+    # Image.fromarray((img.numpy() * 255).astype("uint8")).save("test1.jpg")
+
+    # img = positive_img[0]  # imgs are grayscale
+    # img = img.permute(1, 2, 0)
+    # img = img.squeeze()
+    # Image.fromarray((img.numpy() * 255).astype("uint8")).save("test2.jpg")
+
+    # img = negative_img[0]  # imgs are grayscale
+    # img = img.permute(1, 2, 0)
+    # img = img.squeeze()
+    # Image.fromarray((img.numpy() * 255).astype("uint8")).save("test3.jpg")
+
+    # # iterate over the dataloader to see if it works
+    # start_time = time.time()
+    # for batch in dataloader:
+    #     continue
+    # end_time = time.time()
+    # print(f"Time: {end_time - start_time} seconds")

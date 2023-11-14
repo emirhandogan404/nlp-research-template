@@ -10,7 +10,7 @@
 # We automatically detect W&B login credentials in the ~/.netrc file and pass them to the docker container. To store them, do wandb login once on the host machine.
 
 # Default values
-image="konstantinjdobler/nlp-research-template:latest"
+image="vsc-nlp-research-template-c08cc2a1a24cd8bb2d2dd3912299fd34ceed40b813dfe9de52b39f0103fb1654"
 command="bash"
 gpus="none"
 
@@ -84,8 +84,8 @@ fi
 # IMPORTANT: Use -v /home/username/.cache:/home/mamba/.cache to mount your cache folder to the docker container. The username inside the container is "mamba".
 # Other common mounts:  -v /scratch/username/:/scratch/username/ -v /home/username/data/:/home/username/data/
 # Add -p 5678:5678 to expose port 5678 for remote debugging. But keep in mind that this will block the port for other docker users on the server, so you might have to choose a different one.
-docker run --rm -it --ipc=host \
+docker run --rm -d --ipc=host \
     -v "$(pwd)":/workspace -w /workspace \
-    --user $(id -u):$(id -g) \
+    --user 0:0 \
     --env XDG_CACHE_HOME --env HF_DATASETS_CACHE --env WANDB_CACHE_DIR --env WANDB_DATA_DIR --env WANDB_API_KEY \
-    --gpus=\"device=${gpus}\" $image $command
+    --gpus=\"device=${gpus}\" -v /scratch1/wildlife_conservation/data/gorilla_experiment_splits/k-fold-splits:/workspaces/nlp-research-template/data/gorilla_experiment_splits/k-fold-splits:ro $image $command

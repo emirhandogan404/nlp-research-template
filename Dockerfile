@@ -25,7 +25,7 @@ FROM --platform=linux/amd64 nvidia/cuda:11.8.0-cudnn8-runtime-ubi8 as amd64ubi8
 # Install compiler for .compile() with PyTorch 2.0 and nano for devcontainers
 RUN yum install -y git gcc gcc-c++ nano && yum clean all
 # Copy lockfile to container
-COPY conda-lock.yml /locks/conda-lock.yml
+COPY environment.yml /locks/environment.yml
 
 # -----------------
 # devcontainer base image for amd64 using Ubuntu
@@ -37,7 +37,7 @@ FROM --platform=linux/amd64 nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 as amd
 # Install compiler for .compile() with PyTorch 2.0 and nano for devcontainers
 RUN apt-get update && apt-get install -y git gcc g++ nano openssh-client && apt-get clean
 # Copy lockfile to container
-COPY conda-lock.yml /locks/conda-lock.yml
+COPY environment.yml /locks/environment.yml
 
 # -----------------
 # base image for ppc64le
@@ -46,7 +46,7 @@ FROM --platform=linux/ppc64le nvidia/cuda:11.8.0-cudnn8-runtime-ubi8 as ppc64leu
 # Install compiler for .compile() with PyTorch 2.0
 RUN yum install -y gcc gcc-c++ && yum clean all
 # Copy ppc64le specififc lockfile to container
-COPY ppc64le.conda-lock.yml /locks/conda-lock.yml
+COPY ppc64le.environment.yml /locks/environment.yml
 
 
 
@@ -110,7 +110,7 @@ USER root
 RUN chown $MAMBA_USER:$MAMBA_USER /usr/bin/gcc
 # Necessary to prevent permission error when micromamba tries to install pip dependencies from lockfile
 RUN chown $MAMBA_USER:$MAMBA_USER /locks/
-RUN chown $MAMBA_USER:$MAMBA_USER /locks/conda-lock.yml
+RUN chown $MAMBA_USER:$MAMBA_USER /locks/environment.yml
 # Provide mamba alias for micromamba
 RUN echo "alias mamba=micromamba" >> /usr/local/bin/_activate_current_env.sh
 
@@ -118,13 +118,13 @@ RUN echo "alias mamba=micromamba" >> /usr/local/bin/_activate_current_env.sh
 RUN mkdir /home/mamba/.cache && chmod -R 777 /home/mamba/.cache/
 
 # Switch back to micromamba user
-USER $MAMBA_USER
+USER $MAMBA_1
 ARG TARGETPLATFORM
 # Use line below to debug if cache is correctly mounted
 # RUN --mount=type=cache,target=$MAMBA_ROOT_PREFIX/pkgs,id=conda-$TARGETPLATFORM,uid=$MAMBA_USER_ID,gid=$MAMBA_USER_GID ls -al /opt/conda/pkgs
 # Install dependencies from lockfile into environment, cache packages in /opt/conda/pkgs
 RUN --mount=type=cache,target=$MAMBA_ROOT_PREFIX/pkgs,id=conda-$TARGETPLATFORM,uid=$MAMBA_USER_ID,gid=$MAMBA_USER_GID \
-    micromamba create --name research --yes --file /locks/conda-lock.yml
+    micromamba create --name research --yes --file /locks/environment.yml
 
 # Set conda-forge as default channel (otherwise no default channel is set)
 ARG MAMBA_DOCKERFILE_ACTIVATE=1
@@ -132,7 +132,8 @@ RUN micromamba config prepend channels conda-forge --env
 # Disable micromamba banner at every command
 RUN micromamba config set show_banner false --env
 
-# Install optional tricky pip dependencies that do not work with conda-lock
+
+# Install optional tricky pip dependencies that do not work with environment
 # RUN micromamba run -n research pip install example-dependency --no-deps --no-cache-dir
 
 # Use our environment `research` as default

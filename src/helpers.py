@@ -56,54 +56,54 @@ def check_checkpoint_path_for_wandb(checkpoint_path: str):
     return None
 
 
-class ProgressMetricCallback(Callback):
-    """
-    # BUG: Tying the validation progress to the number of samples and tokens is not working yet.
-    """
+# class ProgressMetricCallback(Callback):
+#     """
+#     # BUG: Tying the validation progress to the number of samples and tokens is not working yet.
+#     """
 
-    def __init__(
-        self,
-        samples_processed=0.0,
-        tokens_processed=0.0,
-    ):
-        super().__init__()
-        self.samples_processed = samples_processed
-        self.tokens_processed = tokens_processed
+#     def __init__(
+#         self,
+#         samples_processed=0.0,
+#         tokens_processed=0.0,
+#     ):
+#         super().__init__()
+#         self.samples_processed = samples_processed
+#         self.tokens_processed = tokens_processed
 
-    @rank_zero_only
-    def on_train_batch_end(self, trainer: Trainer, pl_module: Any, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
-        B, T = batch["input_ids"].shape
-        self.samples_processed += B * trainer.num_devices
-        self.tokens_processed += B * T * trainer.num_devices
+#     @rank_zero_only
+#     def on_train_batch_end(self, trainer: Trainer, pl_module: Any, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
+#         B, T = batch["input_ids"].shape
+#         self.samples_processed += B * trainer.num_devices
+#         self.tokens_processed += B * T * trainer.num_devices
 
-        self.log_dict(
-            {
-                "progress/samples": self.samples_processed,
-                "progress/tokens": self.tokens_processed,
-                "trainer/global_step": float(trainer.global_step),
-            },
-            rank_zero_only=True,
-            on_step=True,
-            on_epoch=False,
-        )
+#         self.log_dict(
+#             {
+#                 "progress/samples": self.samples_processed,
+#                 "progress/tokens": self.tokens_processed,
+#                 "trainer/global_step": float(trainer.global_step),
+#             },
+#             rank_zero_only=True,
+#             on_step=True,
+#             on_epoch=False,
+#         )
 
-    def on_validation_batch_end(
-        self,
-        trainer: Trainer,
-        pl_module: Any,
-        outputs: STEP_OUTPUT | None,
-        batch: Any,
-        batch_idx: int,
-        dataloader_idx: int = 0,
-    ) -> None:
+#     def on_validation_batch_end(
+#         self,
+#         trainer: Trainer,
+#         pl_module: Any,
+#         outputs: STEP_OUTPUT | None,
+#         batch: Any,
+#         batch_idx: int,
+#         dataloader_idx: int = 0,
+#     ) -> None:
 
-        self.log_dict(
-            {
-                "progress/samples": self.samples_processed,
-                "progress/tokens": self.tokens_processed,
-                "trainer/global_step": float(trainer.global_step),
-            },
-            rank_zero_only=True,
-            on_step=True,
-            on_epoch=False,
-        )
+#         self.log_dict(
+#             {
+#                 "progress/samples": self.samples_processed,
+#                 "progress/tokens": self.tokens_processed,
+#                 "trainer/global_step": float(trainer.global_step),
+#             },
+#             rank_zero_only=True,
+#             on_step=True,
+#             on_epoch=False,
+#         )

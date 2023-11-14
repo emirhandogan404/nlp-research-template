@@ -1,4 +1,4 @@
-name: nlp-research-template
+uname: nlp-research-template
 channels:
   - conda-forge
   - nvidia # nvidia channel for cuda packages
@@ -22,7 +22,8 @@ dependencies:
   - evaluate
   - accelerate
   - sentencepiece
-
+  # yolo, wandb edition
+  - ultralytics=8.0.186
   # Good to have
   - numpy
   - scipy
@@ -36,6 +37,9 @@ dependencies:
   - debugpy
   - tqdm
 
+  #yolo fix pt.1
+  - torchvision
+
   # Dev dependencies
   - black
   - ruff
@@ -47,6 +51,10 @@ dependencies:
       - warmup-scheduler
       - simple_parsing
       - print-on-steroids[exceptions]
+      #yolo fix pt.2
+      - opencv-python-headless
+      - efficientnet_pytorch
+
 
 # Non-standard section listing target platforms for conda-lock:
 platforms:

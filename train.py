@@ -10,7 +10,7 @@ from lightning.pytorch.loggers.wandb import WandbLogger
 from lightning.pytorch.plugins.environments import LightningEnvironment, SLURMEnvironment
 from print_on_steroids import graceful_exceptions, logger
 from simple_parsing import parse
-from transformers import AutoTokenizer, PreTrainedTokenizerFast
+# from transformers import AutoTokenizer, PreTrainedTokenizerFast
 
 from args import TrainingArgs
 from dlib import CUDAMetricsCallback, WandbCleanupDiskAndCloudSpaceCallback, get_rank, log_slurm_info, wait_for_debugger
@@ -22,9 +22,8 @@ from src.helpers import (
 )
 from src.model import BasicLM
 
-WANDB_PROJECT = "nlp-research-template"
-WANDB_ENTITY = "konstantinjdobler"
-
+WANDB_PROJECT = "gorillas"
+WANDB_ENTITY = "emirhan404"
 
 def main(args: TrainingArgs):
     ########### CUDA checks ###########
@@ -105,12 +104,12 @@ def main(args: TrainingArgs):
     else:
         model = BasicLM(**model_args)
 
-    tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(args.tokenizer_path or args.hf_model_name, use_fast=True)
-    if not args.resume:
-        pretrained_vocab_size = model.model.get_input_embeddings().weight.shape[0]
-        if len(tokenizer) != pretrained_vocab_size:
-            logger.warning(f"Resizing embedding size from {pretrained_vocab_size} to match tokenizer ({len(tokenizer)}).")
-            model.model.resize_token_embeddings(len(tokenizer))
+    # tokenizer: PreTrainedTokenizerFast = AutoTokenizer.from_pretrained(args.tokenizer_path or args.hf_model_name, use_fast=True)
+    # if not args.resume:
+    #     pretrained_vocab_size = model.model.get_input_embeddings().weight.shape[0]
+    #     if len(tokenizer) != pretrained_vocab_size:
+    #         logger.warning(f"Resizing embedding size from {pretrained_vocab_size} to match tokenizer ({len(tokenizer)}).")
+    #         model.model.resize_token_embeddings(len(tokenizer))
 
     wandb_logger.watch(model, log="all", log_freq=500, log_graph=False)
 
@@ -125,7 +124,7 @@ def main(args: TrainingArgs):
         model = torch.compile(model)
 
     #################### Construct dataloaders & trainer #################
-    dm = LMDataModule(training_args=args, tokenizer=tokenizer)
+    dm = LMDataModule(training_args=args)#, tokenizer=tokenizer)
     lr_monitor = LearningRateMonitor(logging_interval="step")
     wandb_disk_cleanup_callback = WandbCleanupDiskAndCloudSpaceCallback(cleanup_local=True, cleanup_online=False, size_limit=20)
     checkpoint_callback = ModelCheckpoint(
